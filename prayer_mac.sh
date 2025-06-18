@@ -76,6 +76,8 @@ speak_remaining() {
 initial_remaining=$(( target_ts - now_ts ))
 speak_remaining "$initial_remaining"
 
+last_spoken_minute=-1
+
 while true; do
   now_ts=$(date +%s)
   remaining=$(( target_ts - now_ts ))
@@ -100,8 +102,9 @@ while true; do
     sleep 60
 
   else
-    if (( remaining_min % 10 == 0 )); then
+    if (( remaining_min % 10 == 0 && remaining_min != last_spoken_minute )); then
       speak_remaining "$remaining"
+      last_spoken_minute=$remaining_min
     fi
     sleep 60
   fi

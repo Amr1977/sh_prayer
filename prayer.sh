@@ -75,11 +75,12 @@ speak_remaining() {
   espeak $VOICE $PITCH $SPEED "$message"
 }
 
-# ✅ Initial speak
+# ✅ Speak once immediately at launch
 initial_remaining=$(( target_ts - now_ts ))
 speak_remaining "$initial_remaining"
 
-last_spoken_minute=-1
+# ✅ Track last spoken minute
+last_spoken_min=-1
 
 while true; do
   now_ts=$(date +%s)
@@ -102,13 +103,15 @@ while true; do
 
   elif [ "$remaining" -le 1200 ]; then
     speak_remaining "$remaining"
+    last_spoken_min=$remaining_min
+    sleep 60
+
+  elif (( remaining_min % 10 == 0 )) && (( remaining_min != last_spoken_min )); then
+    speak_remaining "$remaining"
+    last_spoken_min=$remaining_min
     sleep 60
 
   else
-    if (( remaining_min % 10 == 0 && remaining_min != last_spoken_minute )); then
-      speak_remaining "$remaining"
-      last_spoken_minute=$remaining_min
-    fi
     sleep 60
   fi
 done

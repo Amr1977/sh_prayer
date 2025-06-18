@@ -1,8 +1,8 @@
 #!/bin/bash
 
-VOICE="-v mb-us2"
-PITCH="-p 30"
-SPEED="-s 110"
+VOICE="Alex"
+PITCH=""   # macOS `say` doesn't support pitch directly
+SPEED="180"
 
 echo "Detecting your location..."
 location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
@@ -29,12 +29,12 @@ for prayer in fajr dhuhr asr maghrib isha; do
   raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
   adjusted_time="$raw_time"
   if [ "$is_dst" -eq 1 ]; then
-    adjusted_time=$(date -d "$raw_time 1 hour" +"%I:%M %p")
+    adjusted_time=$(date -v+1H -jf "%I:%M %p" "$raw_time" +"%I:%M %p")
   fi
 
-  prayer_time_24=$(date -d "$(date +%F) $adjusted_time" +"%H:%M")
+  prayer_time_24=$(date -jf "%I:%M %p" "$adjusted_time" +"%H:%M")
   full_time_local="$(date +%F) $prayer_time_24"
-  prayer_ts=$(date -d "$full_time_local" +%s 2>/dev/null)
+  prayer_ts=$(date -jf "%Y-%m-%d %H:%M" "$full_time_local" +%s 2>/dev/null)
 
   echo "→ $prayer: original=$raw_time adjusted=$adjusted_time => $prayer_time_24"
 
@@ -53,8 +53,9 @@ fi
 
 echo "Next prayer: $next_prayer at $next_time"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOORBELL_SOUND="$SCRIPT_DIR/bell.wav"
+speak() {
+  say -v "$VOICE" -r "$SPEED" "$1"
+}
 
 speak_remaining() {
   remaining_sec=$1
@@ -67,15 +68,11 @@ speak_remaining() {
     message="$m minutes remaining until $next_prayer prayer."
   fi
 
-  if [ -f "$DOORBELL_SOUND" ]; then
-    aplay "$DOORBELL_SOUND"
-  fi
-
   echo "$message"
-  espeak $VOICE $PITCH $SPEED "$message"
+  speak "$message"
 }
 
-# ✅ Speak once immediately at launch
+# ✅ Initial speak on launch
 initial_remaining=$(( target_ts - now_ts ))
 speak_remaining "$initial_remaining"
 
@@ -85,17 +82,17 @@ while true; do
   remaining_min=$(( remaining / 60 ))
 
   if [ "$remaining" -le 0 ]; then
-    espeak $VOICE $PITCH $SPEED "It is time for $next_prayer prayer."
+    speak "It is time for $next_prayer prayer."
     echo "It is time for $next_prayer prayer."
     break
 
   elif [ "$remaining" -le 60 ]; then
     for ((s=remaining; s>=1; s-=2)); do
       echo "$s seconds remaining..."
-      espeak $VOICE $PITCH $SPEED "$s"
+      speak "$s"
       sleep 2
     done
-    espeak $VOICE $PITCH $SPEED "It is time for $next_prayer prayer."
+    speak "It is time for $next_prayer prayer."
     break
 
   elif [ "$remaining" -le 1200 ]; then

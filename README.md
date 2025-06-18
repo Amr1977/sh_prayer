@@ -1,78 +1,91 @@
-# 🕌 Prayer Timer Script with Voice Alerts (Linux)
+# 🕌 Prayer Time Notifier (Bash Script for macOS & Linux)
 
-A Bash script to notify you of the next prayer time using your **current location**, with a **deep synthetic voice** and optional **doorbell sound**.
+A lightweight Bash script that announces the remaining time until the next Islamic prayer (Fajr, Dhuhr, Asr, Maghrib, Isha) based on your location.
 
----
-
-## 🔧 Features
-
-- Auto-detects your **city and country**
-- Fetches prayer times using [MuslimSalat API](https://muslimsalat.com/)
-- Supports **Daylight Saving Time**
-- Voice notifications via `espeak-ng` with **deep male MBROLA voice**
-- Announces remaining time every:
-  - 10 minutes (when > 20 min)
-  - 1 minute (when ≤ 20 min)
-  - Counts seconds every 2s (when ≤ 1 min)
-- Plays optional `bell.wav` if available in script folder
+Supports both Linux (using `espeak`) and macOS (using `say`), with voice configuration, countdown, and intelligent reminders.
 
 ---
 
-## 📦 Requirements
+## ✨ Features
 
-Install the following:
+- 🗺️ Auto-detects your city and country
+- 🕰️ Uses [MuslimSalat API](https://muslimsalat.com) to fetch daily prayer times
+- ⏱️ Speaks the remaining time to next prayer
+- 🔊 Custom voice, pitch, and speed settings
+- ⏲️ Announces every 10 minutes when time remaining > 20 minutes
+- 🧠 Countdown by seconds in last minute
+- 🧭 Automatically adjusts for Daylight Saving Time (DST)
+
+---
+
+## 💻 Supported Platforms
+
+| OS      | Text-to-Speech Engine | Notes                        |
+|---------|-----------------------|------------------------------|
+| Linux   | `espeak`              | Install via package manager |
+| macOS   | `say`                 | Built-in, no installation   |
+
+---
+
+## 🔧 Installation & Usage
+
+### ✅ Linux Setup
 
 ```bash
-sudo apt update
-sudo apt install espeak-ng mbrola mbrola-us2 jq curl aplay
+sudo apt install curl jq espeak
+git clone https://github.com/Amr1977/sh_prayer
+cd sh_prayer
+chmod +x prayer.sh
+./prayer.sh
 ```
 
-Place a sound file named `bell.wav` in the same folder as the script (optional).
-
----
-
-## ▶️ Usage
-
-Make the script executable:
+### 🍏 macOS Setup
 
 ```bash
+brew install jq
+git clone https://github.com/Amr1977/sh_prayer
+cd sh_prayer
 chmod +x prayer.sh
 ./prayer.sh
 ```
 
 ---
 
-## 🗣️ Voice Customization
+## 🔊 Custom Voice Settings
 
-- Uses MBROLA deep male voice: `mb-us2`
-- Slowed pitch and speed for a Morpheus-like tone:
-  ```bash
-  VOICE="-v mb-us2"
-  PITCH="-p 30"
-  SPEED="-s 110"
-  ```
+### Linux (espeak)
 
-Feel free to tweak these for your preferences.
+Inside `prayer.sh`:
+
+```bash
+VOICE="-v mb-us2"     # Deep male voice
+PITCH="-p 30"          # Lower pitch
+SPEED="-s 110"         # Slower rate
+```
+
+### macOS (say)
+
+Inside `prayer.sh`:
+
+```bash
+VOICE="Alex"          # Deepest built-in male voice
+SPEED="-r 180"         # Slower rate
+```
 
 ---
 
-## 📁 File Structure
+## 📎 Repository
 
-```
-your-folder/
-├── prayer.sh
-└── bell.wav      # Optional: short chime before announcement
-```
+🔗 GitHub: [github.com/Amr1977/sh_prayer](https://github.com/Amr1977/sh_prayer)
+
+---
+
+## 🤲 Contributing
+
+Feel free to fork and improve the script for your local needs. Contributions are welcome—add voice selector UIs, alternative APIs, or multi-language support.
 
 ---
 
 ## 📜 License
 
-MIT — share, modify, and enhance freely.
-
----
-
-## 💬 Credits
-
-- MuslimSalat.com API for prayer times
-- MBROLA project for high-quality synthetic voices
+This project is licensed under the MIT License.

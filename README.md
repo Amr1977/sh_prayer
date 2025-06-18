@@ -1,91 +1,53 @@
-# 🕌 Prayer Time Notifier (Bash Script for macOS & Linux)
 
-A lightweight Bash script that announces the remaining time until the next Islamic prayer (Fajr, Dhuhr, Asr, Maghrib, Isha) based on your location.
+# 🕌 Prayer Timer Bash Script
 
-Supports both Linux (using `espeak`) and macOS (using `say`), with voice configuration, countdown, and intelligent reminders.
+A smart Bash script to notify you before the next prayer time using real-time location and voice announcements.
 
----
+## 🌍 Features
 
-## ✨ Features
+- Auto-detects your location using IP geolocation
+- Fetches prayer times using [MuslimSalat API](https://muslimsalat.com/)
+- Adjusts for Daylight Saving Time (DST)
+- Announces remaining time using voice and countdown in the last minute
+- Works on Linux and macOS (compatible versions included)
+- Optional bell sound support
 
-- 🗺️ Auto-detects your city and country
-- 🕰️ Uses [MuslimSalat API](https://muslimsalat.com) to fetch daily prayer times
-- ⏱️ Speaks the remaining time to next prayer
-- 🔊 Custom voice, pitch, and speed settings
-- ⏲️ Announces every 10 minutes when time remaining > 20 minutes
-- 🧠 Countdown by seconds in last minute
-- 🧭 Automatically adjusts for Daylight Saving Time (DST)
+## 🎙️ Voice Configuration
 
----
+- On Linux: Uses `espeak-ng` with custom pitch and speed
+- On macOS: Uses `say` with built-in voices like "Alex", "Fred", or "Samantha"
 
-## 💻 Supported Platforms
+## 🔧 Requirements
 
-| OS      | Text-to-Speech Engine | Notes                        |
-|---------|-----------------------|------------------------------|
-| Linux   | `espeak`              | Install via package manager |
-| macOS   | `say`                 | Built-in, no installation   |
-
----
-
-## 🔧 Installation & Usage
-
-### ✅ Linux Setup
+### Linux
 
 ```bash
-sudo apt install curl jq espeak
-git clone https://github.com/Amr1977/sh_prayer
-cd sh_prayer
-chmod +x prayer.sh
-./prayer.sh
+sudo apt install espeak-ng jq curl
 ```
 
-### 🍏 macOS Setup
+### macOS
 
 ```bash
 brew install jq
-git clone https://github.com/Amr1977/sh_prayer
-cd sh_prayer
+```
+
+## 🔔 Optional: Add bell.wav for sound notification
+
+Place a `bell.wav` file in the same directory if you'd like a sound before each voice announcement.
+
+## 🚀 Usage
+
+```bash
 chmod +x prayer.sh
 ./prayer.sh
 ```
 
----
+## 📁 Included Files
 
-## 🔊 Custom Voice Settings
+- `prayer.sh`: Main script for Linux (espeak)
+- `prayer_mac.sh`: Version adapted for macOS (say)
+- `README.md`
 
-### Linux (espeak)
+## 📦 License
 
-Inside `prayer.sh`:
-
-```bash
-VOICE="-v mb-us2"     # Deep male voice
-PITCH="-p 30"          # Lower pitch
-SPEED="-s 110"         # Slower rate
-```
-
-### macOS (say)
-
-Inside `prayer.sh`:
-
-```bash
-VOICE="Alex"          # Deepest built-in male voice
-SPEED="-r 180"         # Slower rate
-```
-
----
-
-## 📎 Repository
-
-🔗 GitHub: [github.com/Amr1977/sh_prayer](https://github.com/Amr1977/sh_prayer)
-
----
-
-## 🤲 Contributing
-
-Feel free to fork and improve the script for your local needs. Contributions are welcome—add voice selector UIs, alternative APIs, or multi-language support.
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License.
+Public Domain. Free to use, share, or modify. Pray for us 🤲.

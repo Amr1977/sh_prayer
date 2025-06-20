@@ -46,8 +46,9 @@ set_voice() {
     PITCH="-p 20"
     SPEED="-s 100"
   fi
-  espeak -v "$VOICE" "Voice set to $VOICE" $PITCH $SPEED >/dev/null 2>&1
-  log "✅ Voice set to $VOICE"
+  espeak -v "$VOICE" "Besmillah" $PITCH $SPEED >/dev/null 2>&1
+  log "Voice set to VOICE: $VOICE PITCH: $PITCH SPEED: $SPEED"
+  
 }
 
 log() {
@@ -76,26 +77,47 @@ calculate_remaining() {
   local now_ts=$(date +%s)
   local today_timings=$(echo "$response" | jq '.items[0]')
   local day_of_week=$(date "+%A")
-  local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
 
   for prayer in fajr dhuhr asr maghrib isha; do
     local label="$prayer"
-    [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ] && label="jomoa"
+    if [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ]; then
+      label="jomoa"
+    fi
 
     local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
-    local ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
-    [ "$is_dst" -eq 1 ] && ts=$((ts + 3600))
+    local prayer_ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
 
-    if [ "$ts" -gt "$now_ts" ]; then
-      local remaining=$((ts - now_ts))
-      local h=$((remaining / 3600))
+    if [ "$prayer_ts" -gt "$now_ts" ]; then
+      local remaining=$((prayer_ts - now_ts))
+      local h=$(( remaining / 3600 ))
       local m=$(( (remaining % 3600) / 60 ))
-      [ "$h" -gt 0 ] && echo "$h hours and $m minutes remaining until $label prayer." || echo "$m minutes remaining until $label prayer."
+      if [ "$h" -gt 0 ]; then
+        echo "$h hours and $m minutes remaining until $label prayer."
+      else
+        echo "$m minutes remaining until $label prayer."
+      fi
       return
     fi
   done
 
-  echo "All prayers done for today."
+  ## 🕌 Fajr of tomorrow
+  local tomorrow=$(date -d "tomorrow" +%Y-%m-%d)
+  local next_api_url="https://muslimsalat.com/${location// /}/$tomorrow.json"
+  local response_next=$(curl -s "$next_api_url")
+  if ! echo "$response_next" | jq . >/dev/null 2>&1; then
+    echo "❌ Failed to fetch next day prayer times"
+    return
+  fi
+  local raw_time=$(echo "$response_next" | jq -r ".items[0].fajr")
+  local prayer_ts=$(date -d "$tomorrow $raw_time" +%s 2>/dev/null)
+  local remaining=$((prayer_ts - now_ts))
+  local h=$(( remaining / 3600 ))
+  local m=$(( (remaining % 3600) / 60 ))
+  if [ "$h" -gt 0 ]; then
+    echo "$h hours and $m minutes remaining until fajr prayer (tomorrow)."
+  else
+    echo "$m minutes remaining until fajr prayer (tomorrow)."
+  fi
 }
 
 auto_announce() {

@@ -46,6 +46,7 @@ set_voice() {
     PITCH="-p 20"
     SPEED="-s 100"
   fi
+  log "Besmillah"
   espeak -v "$VOICE" "Besmillah" $PITCH $SPEED >/dev/null 2>&1
   log "Voice set to VOICE: $VOICE PITCH: $PITCH SPEED: $SPEED"
   

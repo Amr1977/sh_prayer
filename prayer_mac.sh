@@ -9,6 +9,7 @@ RATE="-r 130"  # Slower, more robotic
 SECONDS_ANNOUNCE=60         # Announce every second if less than this many seconds remain
 MINUTES_ANNOUNCE=20         # Announce every minute if less than this many minutes remain
 MINUTES_INTERVAL=10         # Announce every N minutes otherwise
+GRACE_PERIOD=600            # If missed prayer by more than this (seconds), skip to next
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOORBELL_SOUND="$SCRIPT_DIR/bell.wav"
@@ -115,6 +116,12 @@ while true; do
     now_ts=$(date +%s)
     remaining=$(( target_ts - now_ts ))
     remaining_min=$(( remaining / 60 ))
+
+    # Skip missed prayer if more than GRACE_PERIOD seconds late
+    if [ "$remaining" -le "-$GRACE_PERIOD" ]; then
+      log "Missed $next_prayer prayer by more than $((GRACE_PERIOD/60)) minutes. Skipping to next prayer."
+      break
+    fi
 
     if [ "$remaining" -le 0 ]; then
       log "It is time for $next_prayer prayer."

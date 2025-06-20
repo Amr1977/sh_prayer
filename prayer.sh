@@ -68,7 +68,12 @@ get_next_prayer() {
     exit 1
   fi
   local today_timings=$(echo "$response" | jq '.items[0]')
+  local day_of_week=$(date -d "${date_arg:-$(date +%Y-%m-%d)}" "+%A")
   for prayer in fajr dhuhr asr maghrib isha; do
+    local prayer_name="$prayer"
+    if [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ]; then
+      prayer_name="jomoa"
+    fi
     local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
     local adjusted_time="$raw_time"
     if [ "$is_dst" -eq 1 ]; then
@@ -78,7 +83,7 @@ get_next_prayer() {
     local full_time_local="$(date +%F -d "$date_arg") $prayer_time_24"
     local prayer_ts=$(date -d "$full_time_local" +%s 2>/dev/null)
     if [ "$prayer_ts" -gt "$now_ts" ]; then
-      echo "$prayer|$prayer_time_24|$prayer_ts|$date_arg"
+      echo "$prayer_name|$prayer_time_24|$prayer_ts|$date_arg"
       return
     fi
   done

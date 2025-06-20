@@ -5,15 +5,28 @@ PITCH=""
 SPEED=""
 RATE="-r 130"  # Slower, more robotic
 
-echo "Detecting your location..."
-location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
-echo "Location: $location"
-
-echo "Fetching prayer times..."
-API_URL="https://muslimsalat.com/${location// /}/daily.json"
+# === Constants ===
+SECONDS_ANNOUNCE=60         # Announce every second if less than this many seconds remain
+MINUTES_ANNOUNCE=20         # Announce every minute if less than this many minutes remain
+MINUTES_INTERVAL=10         # Announce every N minutes otherwise
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOORBELL_SOUND="$SCRIPT_DIR/bell.wav"
+LOG_FILE="$SCRIPT_DIR/prayer.log"
+
+log() {
+  local msg="$1"
+  local ts
+  ts=$(date "+%Y-%m-%d %H:%M:%S")
+  echo "[$ts] $msg" | tee -a "$LOG_FILE"
+}
+
+echo "Detecting your location..."
+location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
+log "Location: $location"
+
+echo "Fetching prayer times..."
+API_URL="https://muslimsalat.com/${location// /}/daily.json"
 
 speak_remaining() {
   remaining_sec=$1
@@ -21,16 +34,21 @@ speak_remaining() {
   m=$(( (remaining_sec % 3600) / 60 ))
 
   if [ "$h" -gt 0 ]; then
-    message="$h hours and $m minutes remaining until $next_prayer prayer."
+    if [ "$m" -gt 0 ]; then
+      message="$h hours and $m minutes remaining until $next_prayer prayer."
+    else
+      message="$h hours remaining until $next_prayer prayer."
+    fi
   else
     message="$m minutes remaining until $next_prayer prayer."
   fi
 
   if [ -f "$DOORBELL_SOUND" ]; then
-    afplay "$DOORBELL_SOUND"
+    afplay "$DOORBELL_SOUND" &>/dev/null
   fi
 
-  echo "$message"
+  log "$message"
+  osascript -e "display notification \"$message\" with title \"Prayer Reminder\""
   say -v "$VOICE" $RATE "$message"
 }
 
@@ -44,7 +62,8 @@ get_next_prayer() {
   fi
   local response=$(curl -s "$api_url")
   if ! echo "$response" | jq . >/dev/null 2>&1; then
-    echo "❌ Invalid response from API"
+    log "❌ Invalid response from API"
+    osascript -e "display notification \"❌ Invalid response from API\" with title \"Prayer Reminder\""
     exit 1
   fi
   local today_timings=$(echo "$response" | jq '.items[0]')
@@ -84,7 +103,8 @@ get_next_prayer() {
 while true; do
   # Get next prayer info: name|time|timestamp|date
   IFS="|" read next_prayer next_time target_ts next_date <<< "$(get_next_prayer "")"
-  echo "Next prayer: $next_prayer at $next_time"
+  log "Next prayer: $next_prayer at $next_time"
+  osascript -e "display notification \"Next prayer: $next_prayer at $next_time\" with title \"Prayer Reminder\""
 
   now_ts=$(date +%s)
   initial_remaining=$(( target_ts - now_ts ))
@@ -97,25 +117,31 @@ while true; do
     remaining_min=$(( remaining / 60 ))
 
     if [ "$remaining" -le 0 ]; then
+      log "It is time for $next_prayer prayer."
+      osascript -e "display notification \"It is time for $next_prayer prayer.\" with title \"Prayer Reminder\""
       say -v "$VOICE" $RATE "It is time for $next_prayer prayer."
-      echo "It is time for $next_prayer prayer."
       break
 
-    elif [ "$remaining" -le 60 ]; then
+    elif [ "$remaining" -le $SECONDS_ANNOUNCE ]; then
       for ((s=remaining; s>=1; s-=2)); do
-        echo "$s seconds remaining..."
+        log "$s seconds remaining..."
+        osascript -e "display notification \"$s seconds remaining...\" with title \"Prayer Reminder\""
         say -v "$VOICE" $RATE "$s"
         sleep 2
       done
+      log "It is time for $next_prayer prayer."
+      osascript -e "display notification \"It is time for $next_prayer prayer.\" with title \"Prayer Reminder\""
       say -v "$VOICE" $RATE "It is time for $next_prayer prayer."
       break
 
-    elif [ "$remaining" -le 1200 ]; then
-      speak_remaining "$remaining"
-      last_spoken_min=$remaining_min
+    elif [ "$remaining_min" -le $MINUTES_ANNOUNCE ]; then
+      if (( remaining_min != last_spoken_min )); then
+        speak_remaining "$remaining"
+        last_spoken_min=$remaining_min
+      fi
       sleep 60
 
-    elif (( remaining_min % 10 == 0 )) && (( remaining_min != last_spoken_min )); then
+    elif (( remaining_min % MINUTES_INTERVAL == 0 )) && (( remaining_min != last_spoken_min )); then
       speak_remaining "$remaining"
       last_spoken_min=$remaining_min
       sleep 60
@@ -123,5 +149,3 @@ while true; do
     else
       sleep 60
     fi
-  done
-done

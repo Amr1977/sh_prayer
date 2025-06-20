@@ -1,162 +1,224 @@
 #!/bin/bash
 
-VOICE="-v mb-us2"
-PITCH="-p 30"
-SPEED="-s 110"
-
-# === Constants ===
-SECONDS_ANNOUNCE=60         # Announce every second if less than this many seconds remain
-MINUTES_ANNOUNCE=20         # Announce every minute if less than this many minutes remain
-MINUTES_INTERVAL=10         # Announce every N minutes otherwise
-GRACE_PERIOD=600            # If missed prayer by more than this (seconds), skip to next
+LANGUAGE_MODE="en"
+VOICE="mb-us2"
+MUTE="off"
+SETTINGS_FILE="$HOME/.prayer_settings.conf"
+ALARMS_FILE="$HOME/.prayer_alarms.conf"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/prayer.log"
+DOORBELL_SOUND="$SCRIPT_DIR/bell.wav"
+ADHAN_SOUND="$SCRIPT_DIR/adhan.mp3"
+
+SECONDS_ANNOUNCE=60
+MINUTES_ANNOUNCE=20
+MINUTES_INTERVAL=10
+
+load_settings() {
+  if [ -f "$SETTINGS_FILE" ]; then
+    source "$SETTINGS_FILE"
+  fi
+}
+
+save_settings() {
+  echo "LANGUAGE_MODE=\"$LANGUAGE_MODE\"" > "$SETTINGS_FILE"
+  echo "VOICE=\"$VOICE\"" >> "$SETTINGS_FILE"
+  echo "MUTE=\"$MUTE\"" >> "$SETTINGS_FILE"
+}
+
+set_voice() {
+  if [ "$LANGUAGE_MODE" = "ar" ]; then
+    VOICE="ar"
+    PITCH="-p 50"
+    SPEED="-s 110"
+  else
+    VOICE="mb-us2"
+    PITCH="-p 20"
+    SPEED="-s 100"
+  fi
+  espeak -v "$VOICE" "Voice set to $VOICE" $PITCH $SPEED >/dev/null 2>&1
+  log "✅ Voice set to $VOICE"
+}
 
 log() {
   local msg="$1"
-  local ts
-  ts=$(date "+%Y-%m-%d %H:%M:%S")
+  local ts=$(date "+%Y-%m-%d %H:%M:%S")
   echo "[$ts] $msg" | tee -a "$LOG_FILE"
 }
 
-echo "Detecting your location..."
-location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
-log "Location: $location"
-
-echo "Fetching prayer times..."
-API_URL="https://muslimsalat.com/${location// /}/daily.json"
-
-DOORBELL_SOUND="$SCRIPT_DIR/bell.wav"
-
-speak_remaining() {
-  remaining_sec=$1
-  h=$(( remaining_sec / 3600 ))
-  m=$(( (remaining_sec % 3600) / 60 ))
-
-  if [ "$h" -gt 0 ]; then
-    if [ "$m" -gt 0 ]; then
-      message="$h hours and $m minutes remaining until $next_prayer prayer."
-    else
-      message="$h hours remaining until $next_prayer prayer."
-    fi
-  else
-    message="$m minutes remaining until $next_prayer prayer."
+announce() {
+  if [ "$MUTE" = "off" ]; then
+    notify-send "Prayer Notifier" "$1"
+    espeak -v "$VOICE" $PITCH $SPEED "$1"
   fi
-
-  if [ -f "$DOORBELL_SOUND" ]; then
-    aplay "$DOORBELL_SOUND" &>/dev/null
-  fi
-
-  log "$message"
-  notify-send "Prayer Reminder" "$message"
-  espeak $VOICE $PITCH $SPEED "$message"
 }
 
-get_next_prayer() {
-  local date_arg="$1"
-  local now_ts=$(date +%s)
-  local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
-  local api_url="$API_URL"
-  if [ -n "$date_arg" ]; then
-    api_url="https://muslimsalat.com/${location// /}/$date_arg.json"
-  fi
+calculate_remaining() {
+  local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
+  local api_url="https://muslimsalat.com/${location// /}/daily.json"
   local response=$(curl -s "$api_url")
   if ! echo "$response" | jq . >/dev/null 2>&1; then
     log "❌ Invalid response from API"
-    notify-send "Prayer Reminder" "❌ Invalid response from API"
-    exit 1
+    echo "Prayer time data unavailable."
+    return
   fi
+
+  local now_ts=$(date +%s)
   local today_timings=$(echo "$response" | jq '.items[0]')
-  local day_of_week=$(date -d "${date_arg:-$(date +%Y-%m-%d)}" "+%A")
+  local day_of_week=$(date "+%A")
+  local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
+
   for prayer in fajr dhuhr asr maghrib isha; do
-    local prayer_name="$prayer"
-    if [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ]; then
-      prayer_name="jomoa"
-    fi
+    local label="$prayer"
+    [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ] && label="jomoa"
+
     local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
-    local adjusted_time="$raw_time"
+    local prayer_ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
+
     if [ "$is_dst" -eq 1 ]; then
-      adjusted_time=$(date -d "$raw_time 1 hour" +"%I:%M %p")
+      prayer_ts=$((prayer_ts + 3600))
     fi
-    local prayer_time_24=$(date -d "$(date +%F -d "$date_arg") $adjusted_time" +"%H:%M")
-    local full_time_local="$(date +%F -d "$date_arg") $prayer_time_24"
-    local prayer_ts=$(date -d "$full_time_local" +%s 2>/dev/null)
+
     if [ "$prayer_ts" -gt "$now_ts" ]; then
-      echo "$prayer_name|$prayer_time_24|$prayer_ts|$date_arg"
+      local remaining=$((prayer_ts - now_ts))
+      local h=$((remaining / 3600))
+      local m=$(( (remaining % 3600) / 60 ))
+      [ "$h" -gt 0 ] && echo "$h hours and $m minutes remaining until $label prayer." || echo "$m minutes remaining until $label prayer."
       return
     fi
   done
-  # If no more prayers today, return Fajr of next day
-  local next_date=$(date -d "${date_arg:-today} +1 day" +%Y-%m-%d)
-  local api_url_next="https://muslimsalat.com/${location// /}/$next_date.json"
-  local response_next=$(curl -s "$api_url_next")
-  local timings_next=$(echo "$response_next" | jq '.items[0]')
-  local raw_time=$(echo "$timings_next" | jq -r ".fajr")
-  local adjusted_time="$raw_time"
-  if [ "$is_dst" -eq 1 ]; then
-    adjusted_time=$(date -d "$raw_time 1 hour" +"%I:%M %p")
-  fi
-  local prayer_time_24=$(date -d "$next_date $adjusted_time" +"%H:%M")
-  local full_time_local="$next_date $prayer_time_24"
-  local prayer_ts=$(date -d "$full_time_local" +%s 2>/dev/null)
-  echo "fajr|$prayer_time_24|$prayer_ts|$next_date"
+
+  echo "All prayers done for today."
 }
 
-while true; do
-  # Get next prayer info: name|time|timestamp|date
-  IFS="|" read next_prayer next_time target_ts next_date <<< "$(get_next_prayer "")"
-  log "Next prayer: $next_prayer at $next_time"
-  notify-send "Prayer Reminder" "Next prayer: $next_prayer at $next_time"
+start_alarm() {
+  echo "$1|$2" >> "$ALARMS_FILE"
+  echo "espeak -v $VOICE \"⏰ Alarm $1 at $2\"" | at "$2" 2>/dev/null
+  log "✅ Alarm '$1' set at $2"
+}
 
-  now_ts=$(date +%s)
-  initial_remaining=$(( target_ts - now_ts ))
-  speak_remaining "$initial_remaining"
-  last_spoken_min=-1
+start_cdtimer() {
+  IFS=":" read -r h m <<< "${2//:/ }"
+  local seconds=$((10#$h * 3600 + 10#$m * 60))
+  (
+    sleep "$seconds"
+    announce "⏳ Countdown timer $1 completed."
+    log "⏳ Countdown timer '$1' completed."
+  ) &
+  log "⏳ Countdown timer '$1' started for $h hours and $m minutes."
+}
 
+declare -A TIMERS
+
+handle_timer() {
+  local now=$(date +%s)
+  case "$2" in
+    start)
+      TIMERS["$1"]=$now
+      log "⏱️ Timer '$1' started."
+      ;;
+    stop)
+      if [ -n "${TIMERS[$1]}" ]; then
+        local duration=$((now - ${TIMERS[$1]}))
+        unset TIMERS["$1"]
+        log "⏱️ Timer '$1' stopped after $duration seconds."
+      else
+        log "⚠️ Timer '$1' not found."
+      fi
+      ;;
+    pause)
+      log "⏸️ Pause not implemented yet for '$1'."
+      ;;
+    *)
+      log "❓ Usage: timer name start|stop|pause"
+      ;;
+  esac
+}
+
+auto_announce() {
+  local last_spoken_min=-1
   while true; do
-    now_ts=$(date +%s)
-    remaining=$(( target_ts - now_ts ))
-    remaining_min=$(( remaining / 60 ))
+    sleep 60
+    [ "$MUTE" = "on" ] && continue
+    msg=$(calculate_remaining)
+    [[ "$msg" =~ ([0-9]+)\ minutes ]] && remaining_min=${BASH_REMATCH[1]} || remaining_min=0
 
-    # Skip missed prayer if more than GRACE_PERIOD seconds late
-    if [ "$remaining" -le "-$GRACE_PERIOD" ]; then
-      log "Missed $next_prayer prayer by more than $((GRACE_PERIOD/60)) minutes. Skipping to next prayer."
-      break
-    fi
-
-    if [ "$remaining" -le 0 ]; then
-      log "It is time for $next_prayer prayer."
-      notify-send "Prayer Reminder" "It is time for $next_prayer prayer."
-      espeak $VOICE $PITCH $SPEED "It is time for $next_prayer prayer."
-      break
-
-    elif [ "$remaining" -le $SECONDS_ANNOUNCE ]; then
-      for ((s=remaining; s>=1; s-=2)); do
+    if [ "$remaining_min" -le $((SECONDS_ANNOUNCE / 60)) ]; then
+      for ((s=SECONDS_ANNOUNCE; s>=1; s-=2)); do
         log "$s seconds remaining..."
-        notify-send "Prayer Reminder" "$s seconds remaining..."
-        espeak $VOICE $PITCH $SPEED "$s"
+        announce "$s seconds remaining..."
         sleep 2
       done
-      log "It is time for $next_prayer prayer."
-      notify-send "Prayer Reminder" "It is time for $next_prayer prayer."
-      espeak $VOICE $PITCH $SPEED "It is time for $next_prayer prayer."
-      break
-
-    elif [ "$remaining_min" -le $MINUTES_ANNOUNCE ]; then
+    elif [ "$remaining_min" -le "$MINUTES_ANNOUNCE" ]; then
       if (( remaining_min != last_spoken_min )); then
-        speak_remaining "$remaining"
+        log "$msg"
+        announce "$msg"
         last_spoken_min=$remaining_min
       fi
-      sleep 60
-
     elif (( remaining_min % MINUTES_INTERVAL == 0 )) && (( remaining_min != last_spoken_min )); then
-      speak_remaining "$remaining"
+      log "$msg"
+      announce "$msg"
       last_spoken_min=$remaining_min
-      sleep 60
-
-    else
-      sleep 60
     fi
   done
+}
+
+handle_command() {
+  case "$1" in
+    ar) LANGUAGE_MODE="ar"; set_voice; save_settings; log "✅ اللغة الآن: العربية" ;;
+    en) LANGUAGE_MODE="en"; set_voice; save_settings; log "✅ Language set to English" ;;
+    mute)
+      [[ "$2" =~ ^(on|off)$ ]] && MUTE="$2" && save_settings && log "🔇 Mute set to $MUTE" || log "❓ Usage: mute on|off"
+      ;;
+    now)
+      msg=$(calculate_remaining)
+      log "$msg"
+      announce "$msg"
+      ;;
+    alarm)
+      [[ "$2" && "$3" ]] && start_alarm "$2" "$3" || log "❓ Usage: alarm name hh:mm"
+      ;;
+    cdtimer)
+      [[ "$2" && "$3" ]] && start_cdtimer "$2" "$3" || log "❓ Usage: cdtimer name hh:mm"
+      ;;
+    timer)
+      [[ "$2" && "$3" ]] && handle_timer "$2" "$3" || log "❓ Usage: timer name start|stop|pause"
+      ;;
+    v)
+      [[ "$2" == "+" ]] && amixer sset Master 5%+ > /dev/null && echo "🔊 Volume increased"
+      [[ "$2" == "-" ]] && amixer sset Master 5%- > /dev/null && echo "🔉 Volume decreased"
+      [[ "$2" != "+" && "$2" != "-" ]] && echo "❓ Usage: v + | v -"
+      ;;
+    play)
+      if [[ "$2" == "azan" ]]; then
+  if [ -f "$ADHAN_SOUND" ]; then
+    mpv "$ADHAN_SOUND" >/dev/null 2>&1 &
+  else
+    log "❌ Azan file not found."
+  fi
+fi
+      ;;
+    persist) save_settings; log "✅ Settings persisted." ;;
+    exit|quit) log "👋 Exiting..."; exit 0 ;;
+    *) log "❓ Unknown command: $1" ;;
+  esac
+}
+
+# 🚀 Main
+load_settings
+set_voice
+
+# Initial announcement
+msg=$(calculate_remaining)
+log "$msg"
+announce "$msg"
+
+# Auto announce in background
+auto_announce &
+
+# REPL
+while true; do
+  read -rp ">> " cmd arg1 arg2
+  handle_command "$cmd" "$arg1" "$arg2"
 done

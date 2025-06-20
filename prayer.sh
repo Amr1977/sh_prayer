@@ -78,6 +78,7 @@ calculate_remaining() {
   local now_ts=$(date +%s)
   local today_timings=$(echo "$response" | jq '.items[0]')
   local day_of_week=$(date "+%A")
+  local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
 
   for prayer in fajr dhuhr asr maghrib isha; do
     local label="$prayer"
@@ -87,6 +88,7 @@ calculate_remaining() {
 
     local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
     local prayer_ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
+    [ "$is_dst" -eq 1 ] && prayer_ts=$((prayer_ts + 3600))
 
     if [ "$prayer_ts" -gt "$now_ts" ]; then
       local remaining=$((prayer_ts - now_ts))
@@ -111,6 +113,7 @@ calculate_remaining() {
   fi
   local raw_time=$(echo "$response_next" | jq -r ".items[0].fajr")
   local prayer_ts=$(date -d "$tomorrow $raw_time" +%s 2>/dev/null)
+  [ "$is_dst" -eq 1 ] && prayer_ts=$((prayer_ts + 3600))
   local remaining=$((prayer_ts - now_ts))
   local h=$(( remaining / 3600 ))
   local m=$(( (remaining % 3600) / 60 ))

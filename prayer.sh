@@ -108,7 +108,6 @@ auto_announce() {
     local remaining_min=0
     local remaining_hr=0
 
-    # Extract hours and minutes
     if [[ "$msg" =~ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
       remaining_hr="${BASH_REMATCH[1]}"
       remaining_min="${BASH_REMATCH[2]}"
@@ -119,27 +118,43 @@ auto_announce() {
       continue
     fi
 
-    # Announce at every MINUTES_INTERVAL even if hours > 0
-    if (( remaining_min % MINUTES_INTERVAL == 0 )) && (( remaining_min != last_spoken_min )); then
+    # فقط أعلن إذا الدقائق تغيرت
+    if (( remaining_min == last_spoken_min )); then
+      continue
+    fi
+
+    # شرط ساعات > 0: أعلن كل MINUTES_INTERVAL
+    if (( remaining_hr > 0 )); then
+      if (( remaining_min > 0 )) && (( remaining_min % MINUTES_INTERVAL == 0 )); then
+        log "$msg"
+        announce "$msg"
+        last_spoken_min=$remaining_min
+      fi
+      continue
+    fi
+
+    # شرط ساعات == 0: أعلن عند كل دقيقة داخل النطاق
+    if (( remaining_min <= SECONDS_ANNOUNCE / 60 )); then
+      for ((s=SECONDS_ANNOUNCE; s>=1; s-=2)); do
+        log "$s seconds remaining..."
+        announce "$s seconds remaining..."
+        sleep 2
+      done
+      continue
+    fi
+
+    if (( remaining_min <= MINUTES_ANNOUNCE )); then
       log "$msg"
       announce "$msg"
       last_spoken_min=$remaining_min
       continue
     fi
 
-    # Only do minute or second countdown when we're close
-    if (( remaining_hr == 0 )); then
-      if (( remaining_min <= SECONDS_ANNOUNCE / 60 )); then
-        for ((s=SECONDS_ANNOUNCE; s>=1; s-=2)); do
-          log "$s seconds remaining..."
-          announce "$s seconds remaining..."
-          sleep 2
-        done
-      elif (( remaining_min <= MINUTES_ANNOUNCE )) && (( remaining_min != last_spoken_min )); then
-        log "$msg"
-        announce "$msg"
-        last_spoken_min=$remaining_min
-      fi
+    # ساعات = 0 ودقائق من مضاعفات MINUTES_INTERVAL
+    if (( remaining_min % MINUTES_INTERVAL == 0 )); then
+      log "$msg"
+      announce "$msg"
+      last_spoken_min=$remaining_min
     fi
   done
 }

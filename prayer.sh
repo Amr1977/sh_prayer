@@ -269,6 +269,23 @@ handle_command() {
       save_settings
       log "✅ Settings persisted."
       ;;
+          help)
+      echo -e "🆘 Available commands:\n\
+  ar                - Switch language to Arabic\n\
+  en                - Switch language to English\n\
+  mute on|off       - Mute or unmute announcements\n\
+  now               - Show time remaining until next prayer\n\
+  play azan         - Play the azan sound\n\
+  v +|-             - Increase or decrease system volume\n\
+  set interval N    - Set minutes interval for announcements\n\
+  set announce minutes N - Set minutes threshold for frequent announcements\n\
+  set announce seconds N - Set seconds threshold for countdown\n\
+  show settings     - Show current settings\n\
+  out               - Record OUT entry for current prayer\n\
+  persist           - Save current settings\n\
+  exit|quit         - Exit the program\n\
+  help              - Show this help message"
+      ;;
     exit|quit)
       log "👋 Exiting..."; exit 0 ;;
     *)

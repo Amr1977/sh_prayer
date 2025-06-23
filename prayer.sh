@@ -302,6 +302,11 @@ log "$msg"
 announce "$msg"
 auto_announce &
 
+if [[ "$#" -gt 0 ]]; then
+  handle_command "$@"
+  exit 0
+fi
+
 while true; do
   read -rp ">> " cmd arg1 arg2 arg3
   handle_command "$cmd" "$arg1" "$arg2" "$arg3"

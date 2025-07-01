@@ -49,7 +49,6 @@ set_voice() {
   log "Besmillah"
   espeak -v "$VOICE" "Besmillah" $PITCH $SPEED >/dev/null 2>&1
   log "Voice set to VOICE: $VOICE PITCH: $PITCH SPEED: $SPEED"
-  
 }
 
 log() {
@@ -82,9 +81,7 @@ calculate_remaining() {
 
   for prayer in fajr dhuhr asr maghrib isha; do
     local label="$prayer"
-    if [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ]; then
-      label="jomoa"
-    fi
+    [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ] && label="jomoa"
 
     local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
     local prayer_ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
@@ -95,15 +92,15 @@ calculate_remaining() {
       local h=$(( remaining / 3600 ))
       local m=$(( (remaining % 3600) / 60 ))
       if [ "$h" -gt 0 ]; then
-        echo "$h hours and $m minutes remaining until $label prayer."
+        echo "$label prayer in $h hours and $m minutes."
       else
-        echo "$m minutes remaining until $label prayer."
+        echo "$label prayer in $m minutes."
       fi
       return
     fi
   done
 
-  ## 🕌 Fajr of tomorrow
+  # fallback: Fajr of tomorrow
   local tomorrow=$(date -d "tomorrow" +%Y-%m-%d)
   local next_api_url="https://muslimsalat.com/${location// /}/$tomorrow.json"
   local response_next=$(curl -s "$next_api_url")
@@ -118,14 +115,15 @@ calculate_remaining() {
   local h=$(( remaining / 3600 ))
   local m=$(( (remaining % 3600) / 60 ))
   if [ "$h" -gt 0 ]; then
-    echo "$h hours and $m minutes remaining until fajr prayer (tomorrow)."
+    echo "Fajr prayer in $h hours and $m minutes."
   else
-    echo "$m minutes remaining until fajr prayer (tomorrow)."
+    echo "Fajr prayer in $m minutes."
   fi
 }
 
 auto_announce() {
   local last_spoken_min=-1
+  local last_spoken_hr=-1
   while true; do
     sleep 60
     [ "$MUTE" = "on" ] && continue
@@ -144,22 +142,20 @@ auto_announce() {
       continue
     fi
 
-    # فقط أعلن إذا الدقائق تغيرت
-    if (( remaining_min == last_spoken_min )); then
+    if (( remaining_min == last_spoken_min && remaining_hr == last_spoken_hr )); then
       continue
     fi
 
-    # شرط ساعات > 0: أعلن كل MINUTES_INTERVAL
     if (( remaining_hr > 0 )); then
-      if (( remaining_min > 0 )) && (( remaining_min % MINUTES_INTERVAL == 0 )); then
+      if (( remaining_min % MINUTES_INTERVAL == 0 )); then
         log "$msg"
         announce "$msg"
         last_spoken_min=$remaining_min
+        last_spoken_hr=$remaining_hr
       fi
       continue
     fi
 
-    # شرط ساعات == 0: أعلن عند كل دقيقة داخل النطاق
     if (( remaining_min <= SECONDS_ANNOUNCE / 60 )); then
       for ((s=SECONDS_ANNOUNCE; s>=1; s-=2)); do
         log "$s seconds remaining..."
@@ -173,14 +169,15 @@ auto_announce() {
       log "$msg"
       announce "$msg"
       last_spoken_min=$remaining_min
+      last_spoken_hr=$remaining_hr
       continue
     fi
 
-    # ساعات = 0 ودقائق من مضاعفات MINUTES_INTERVAL
     if (( remaining_min % MINUTES_INTERVAL == 0 )); then
       log "$msg"
       announce "$msg"
       last_spoken_min=$remaining_min
+      last_spoken_hr=$remaining_hr
     fi
   done
 }
@@ -269,22 +266,20 @@ handle_command() {
       save_settings
       log "✅ Settings persisted."
       ;;
-          help)
+    help)
       echo -e "🆘 Available commands:\n\
-  ar                - Switch language to Arabic\n\
-  en                - Switch language to English\n\
-  mute on|off       - Mute or unmute announcements\n\
-  now               - Show time remaining until next prayer\n\
-  play azan         - Play the azan sound\n\
-  v +|-             - Increase or decrease system volume\n\
-  set interval N    - Set minutes interval for announcements\n\
-  set announce minutes N - Set minutes threshold for frequent announcements\n\
-  set announce seconds N - Set seconds threshold for countdown\n\
-  show settings     - Show current settings\n\
-  out               - Record OUT entry for current prayer\n\
+  ar | en           - Switch language\n\
+  mute on|off       - Toggle mute\n\
+  now               - Show remaining time\n\
+  play azan         - Play azan audio\n\
+  v +|-             - Volume up/down\n\
+  set interval N    - Set interval in minutes\n\
+  set announce minutes|seconds N - Fine-tune alerts\n\
+  show settings     - Display settings\n\
+  out               - Record OUT log entry\n\
   persist           - Save current settings\n\
-  exit|quit         - Exit the program\n\
-  help              - Show this help message"
+  exit|quit         - Exit script\n\
+  help              - Show this list"
       ;;
     exit|quit)
       log "👋 Exiting..."; exit 0 ;;

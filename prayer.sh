@@ -7,11 +7,13 @@ SPEED="-s 100"
 MUTE="off"
 
 SECONDS_ANNOUNCE=60
-MINUTES_ANNOUNCE=20
+MINUTES_ANNOUNCE=30
 MINUTES_INTERVAL=10
+DISABLE_NOTIFY=false
 
 SETTINGS_FILE="$HOME/.prayer_settings.conf"
-ALARMS_FILE="$HOME/.prayer_alarms.conf"
+PRAYER_CACHE_FILE="/tmp/prayer_times_$(date +%F).json"
+LOCKFILE="/tmp/prayer_notify.lock"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/prayer.log"
@@ -19,9 +21,7 @@ OUT_LOG_FILE="$SCRIPT_DIR/prayer_out.log"
 DOORBELL_SOUND="$SCRIPT_DIR/bell.wav"
 ADHAN_SOUND="$SCRIPT_DIR/azan.mp3"
 
-load_settings() {
-  [ -f "$SETTINGS_FILE" ] && source "$SETTINGS_FILE"
-}
+load_settings() { [ -f "$SETTINGS_FILE" ] && source "$SETTINGS_FILE"; }
 
 save_settings() {
   cat > "$SETTINGS_FILE" <<EOF
@@ -33,6 +33,7 @@ MUTE="$MUTE"
 SECONDS_ANNOUNCE=$SECONDS_ANNOUNCE
 MINUTES_ANNOUNCE=$MINUTES_ANNOUNCE
 MINUTES_INTERVAL=$MINUTES_INTERVAL
+DISABLE_NOTIFY=$DISABLE_NOTIFY
 EOF
 }
 
@@ -58,66 +59,86 @@ log() {
 }
 
 announce() {
-  if [ "$MUTE" = "off" ]; then
-    notify-send "Prayer Notifier" "$1"
-    espeak -v "$VOICE" "$1" $PITCH $SPEED
+  [ "$MUTE" = "on" ] && log "🔇 Skipping announcement due to mute" && return
+  $DISABLE_NOTIFY || notify-send "Prayer Notifier" "$1"
+  [ "$LANGUAGE_MODE" = "ar" ] && return
+  espeak -v "$VOICE" "$1" $PITCH $SPEED >/dev/null 2>&1
+}
+
+fetch_prayer_times() {
+  if [ ! -f "$PRAYER_CACHE_FILE" ]; then
+    local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
+    local api_url="https://muslimsalat.com/${location// /}/daily.json"
+    curl -s "$api_url" > "$PRAYER_CACHE_FILE"
   fi
+  cat "$PRAYER_CACHE_FILE"
+}
+
+get_prayer_time() {
+  local json="$1" key="$2"
+  echo "$json" | jq -r ".items[0].$key"
 }
 
 calculate_remaining() {
-  local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
-  local api_url="https://muslimsalat.com/${location// /}/daily.json"
-  local response=$(curl -s "$api_url")
-  if ! echo "$response" | jq . >/dev/null 2>&1; then
-    log "❌ Invalid response from API"
-    echo "Prayer time data unavailable."
-    return
-  fi
-
   local now_ts=$(date +%s)
-  local today_timings=$(echo "$response" | jq '.items[0]')
+  local response=$(fetch_prayer_times)
   local day_of_week=$(date "+%A")
   local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
 
-  for prayer in fajr dhuhr asr maghrib isha; do
-    local label="$prayer"
-    [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ] && label="jomoa"
+  local maghrib=$(get_prayer_time "$response" "maghrib")
+  local isha=$(get_prayer_time "$response" "isha")
+  local fajr=$(get_prayer_time "$response" "fajr")
 
-    local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
-    local prayer_ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
-    [ "$is_dst" -eq 1 ] && prayer_ts=$((prayer_ts + 3600))
+  local maghrib_ts=$(date -d "$(date +%F) $maghrib" +%s)
+  local isha_ts=$(date -d "$(date +%F) $isha" +%s)
+  local fajr_ts=$(date -d "$(date -d tomorrow +%F) $fajr" +%s)
 
-    if [ "$prayer_ts" -gt "$now_ts" ]; then
-      local remaining=$((prayer_ts - now_ts))
-      local h=$(( remaining / 3600 ))
-      local m=$(( (remaining % 3600) / 60 ))
-      if [ "$h" -gt 0 ]; then
-        echo "$label prayer in $h hours and $m minutes."
-      else
-        echo "$label prayer in $m minutes."
+  [ "$is_dst" -eq 1 ] && {
+    maghrib_ts=$((maghrib_ts + 3600))
+    isha_ts=$((isha_ts + 3600))
+    fajr_ts=$((fajr_ts + 3600))
+  }
+
+  local night_duration=$((fajr_ts - maghrib_ts))
+  local last_third_start=$((maghrib_ts + 2 * night_duration / 3))
+
+  if (( now_ts < maghrib_ts )); then
+    # Regular daytime: announce next prayer
+    for prayer in fajr dhuhr asr maghrib isha; do
+      local raw=$(get_prayer_time "$response" "$prayer")
+      local ts=$(date -d "$(date +%F) $raw" +%s)
+      [ "$is_dst" -eq 1 ] && ts=$((ts + 3600))
+      if (( ts > now_ts )); then
+        local diff=$((ts - now_ts))
+        local h=$(( diff / 3600 ))
+        local m=$(( (diff % 3600) / 60 ))
+        return_msg "$prayer" "$h" "$m"
+        return
       fi
-      return
-    fi
-  done
-
-  # fallback: Fajr of tomorrow
-  local tomorrow=$(date -d "tomorrow" +%Y-%m-%d)
-  local next_api_url="https://muslimsalat.com/${location// /}/$tomorrow.json"
-  local response_next=$(curl -s "$next_api_url")
-  if ! echo "$response_next" | jq . >/dev/null 2>&1; then
-    echo "❌ Failed to fetch next day prayer times"
+    done
+  elif (( now_ts >= isha_ts && now_ts < last_third_start )); then
+    local diff=$((last_third_start - now_ts))
+    local h=$(( diff / 3600 ))
+    local m=$(( (diff % 3600) / 60 ))
+    echo "Last third of the night begins in $h hours and $m minutes."
     return
-  fi
-  local raw_time=$(echo "$response_next" | jq -r ".items[0].fajr")
-  local prayer_ts=$(date -d "$tomorrow $raw_time" +%s 2>/dev/null)
-  [ "$is_dst" -eq 1 ] && prayer_ts=$((prayer_ts + 3600))
-  local remaining=$((prayer_ts - now_ts))
-  local h=$(( remaining / 3600 ))
-  local m=$(( (remaining % 3600) / 60 ))
-  if [ "$h" -gt 0 ]; then
+  elif (( now_ts >= last_third_start && now_ts < fajr_ts )); then
+    local diff=$((fajr_ts - now_ts))
+    local h=$(( diff / 3600 ))
+    local m=$(( (diff % 3600) / 60 ))
     echo "Fajr prayer in $h hours and $m minutes."
+    return
   else
-    echo "Fajr prayer in $m minutes."
+    echo "No upcoming prayer found."
+  fi
+}
+
+return_msg() {
+  local label="$1" h="$2" m="$3"
+  if (( h > 0 )); then
+    echo "$label prayer in $h hours and $m minutes."
+  else
+    echo "$label prayer in $m minutes."
   fi
 }
 
@@ -182,47 +203,16 @@ auto_announce() {
   done
 }
 
-record_out_entry() {
-  local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
-  local api_url="https://muslimsalat.com/${location// /}/daily.json"
-  local response=$(curl -s "$api_url")
-  local now_ts=$(date +%s)
-  local today_timings=$(echo "$response" | jq '.items[0]')
-  local day_of_week=$(date "+%A")
-  local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
-
-  for prayer in fajr dhuhr asr maghrib isha; do
-    local label="$prayer"
-    [ "$prayer" = "dhuhr" ] && [ "$day_of_week" = "Friday" ] && label="jomoa"
-
-    local raw_time=$(echo "$today_timings" | jq -r ".${prayer}")
-    local ts=$(date -d "$(date +%F) $raw_time" +%s 2>/dev/null)
-    [ "$is_dst" -eq 1 ] && ts=$((ts + 3600))
-
-    if (( now_ts < ts )); then
-      local diff=$((ts - now_ts))
-      local msg="⏳ OUT for $label prayer, $((diff / 60)) minutes before azan"
-      echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "$OUT_LOG_FILE"
-      log "$msg"
-      return
-    elif (( now_ts >= ts && now_ts - ts < 3600 )); then
-      local diff=$((now_ts - ts))
-      local msg="✅ OUT for $label prayer, $((diff / 60)) minutes since azan"
-      echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "$OUT_LOG_FILE"
-      log "$msg"
-      return
-    fi
-  done
-
-  log "⚠️ Could not determine current prayer time."
-}
-
 handle_command() {
   case "$1" in
-    ar) LANGUAGE_MODE="ar"; set_voice; save_settings; log "✅ اللغة الآن: العربية" ;;
-    en) LANGUAGE_MODE="en"; set_voice; save_settings; log "✅ Language set to English" ;;
+    ar|en)
+      LANGUAGE_MODE="$1"
+      set_voice
+      save_settings
+      log "✅ Language set to $LANGUAGE_MODE"
+      ;;
     mute)
-      [[ "$2" =~ ^(on|off)$ ]] && MUTE="$2" && save_settings && log "🔇 Mute set to $MUTE" || log "❓ Usage: mute on|off"
+      [[ "$2" =~ ^(on|off)$ ]] && MUTE="$2" && save_settings && log "🔇 Mute set to $MUTE"
       ;;
     now)
       local msg=$(calculate_remaining)
@@ -230,71 +220,103 @@ handle_command() {
       announce "$msg"
       ;;
     play)
-      if [[ "$2" == "azan" && -f "$ADHAN_SOUND" ]]; then
-        mpv "$ADHAN_SOUND" >/dev/null 2>&1 &
-      else
-        log "❌ Azan file not found."
-      fi
+      [[ "$2" == "azan" && -f "$ADHAN_SOUND" ]] && mpv "$ADHAN_SOUND" >/dev/null 2>&1 &
       ;;
     v)
-      [[ "$2" == "+" ]] && amixer sset Master 5%+ > /dev/null && echo "🔊 Volume increased"
-      [[ "$2" == "-" ]] && amixer sset Master 5%- > /dev/null && echo "🔉 Volume decreased"
+      [[ "$2" == "+" ]] && amixer sset Master 5%+ >/dev/null && echo "🔊 Volume increased"
+      [[ "$2" == "-" ]] && amixer sset Master 5%- >/dev/null && echo "🔉 Volume decreased"
       ;;
     set)
       case "$2" in
         interval)
-          MINUTES_INTERVAL="$3"
-          log "🔁 MINUTES_INTERVAL set to $3"
-          save_settings
+          MINUTES_INTERVAL="$3"; save_settings; log "🔁 MINUTES_INTERVAL=$3"
           ;;
         announce)
-          [[ "$3" == "minutes" ]] && MINUTES_ANNOUNCE="$4" && log "🕐 MINUTES_ANNOUNCE set to $4" && save_settings
-          [[ "$3" == "seconds" ]] && SECONDS_ANNOUNCE="$4" && log "⏱️ SECONDS_ANNOUNCE set to $4" && save_settings
-          ;;
-        *)
-          log "❓ Usage: set interval N | set announce minutes|seconds N"
+          [[ "$3" == "minutes" ]] && MINUTES_ANNOUNCE="$4"
+          [[ "$3" == "seconds" ]] && SECONDS_ANNOUNCE="$4"
+          save_settings
           ;;
       esac
       ;;
     show)
-      [[ "$2" == "settings" ]] && echo -e "⏱️ Current settings:\n- MINUTES_INTERVAL=$MINUTES_INTERVAL\n- MINUTES_ANNOUNCE=$MINUTES_ANNOUNCE\n- SECONDS_ANNOUNCE=$SECONDS_ANNOUNCE"
+      echo -e "⏱️ Current settings:\n- MINUTES_INTERVAL=$MINUTES_INTERVAL\n- MINUTES_ANNOUNCE=$MINUTES_ANNOUNCE\n- SECONDS_ANNOUNCE=$SECONDS_ANNOUNCE"
       ;;
-    out)
-      record_out_entry
+    reload)
+      load_settings; set_voice; log "🔁 Settings reloaded."
       ;;
     persist)
-      save_settings
-      log "✅ Settings persisted."
+      save_settings; log "✅ Settings persisted."
+      ;;
+     times)
+      local response=$(fetch_prayer_times)
+      local date=$(echo "$response" | jq -r '.items[0].date_for')
+      local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
+
+      echo "📅 Prayer Times for $date:"
+
+      declare -A times
+      for p in fajr dhuhr asr maghrib isha; do
+        local raw=$(get_prayer_time "$response" "$p")
+        local ts=$(date -d "$(date +%F) $raw" +%s)
+        [ "$is_dst" -eq 1 ] && ts=$((ts + 3600))
+        times[$p]=$ts
+        local adj=$(date -d "@$ts" +"%I:%M %p" | sed 's/^0//')
+        printf "🕒 %7s: %s\n" "$(tr 'a-z' 'A-Z' <<< "$p")" "$adj"
+      done
+
+      # Fetch tomorrow's fajr for accurate night duration
+      local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
+      local tomorrow=$(date -d "tomorrow" +%Y-%m-%d)
+      local api_url="https://muslimsalat.com/${location// /}/$tomorrow.json"
+      local next_day=$(curl -s "$api_url")
+
+      local fajr_tomorrow=$(echo "$next_day" | jq -r ".items[0].fajr")
+      local fajr_ts=$(date -d "$tomorrow $fajr_tomorrow" +%s)
+      [ "$is_dst" -eq 1 ] && fajr_ts=$((fajr_ts + 3600))
+
+      local night_duration=$((fajr_ts - times[maghrib]))
+      local last_third_start=$((times[maghrib] + 2 * night_duration / 3))
+      local last_third_str=$(date -d "@$last_third_start" +"%I:%M %p" | sed 's/^0//')
+      echo "🌙 LAST THIRD: $last_third_str"
       ;;
     help)
-      echo -e "🆘 Available commands:\n\
-  ar | en           - Switch language\n\
-  mute on|off       - Toggle mute\n\
-  now               - Show remaining time\n\
-  play azan         - Play azan audio\n\
-  v +|-             - Volume up/down\n\
-  set interval N    - Set interval in minutes\n\
+  echo -e "🆘 Commands:\n\
+  ar | en                   - Switch language\n\
+  mute on|off              - Toggle mute\n\
+  now                      - Show remaining time\n\
+  times                    - Show today's prayer times\n\
+  play azan                - Play azan audio\n\
+  v +|-                    - Volume up/down\n\
+  set interval N           - Set interval in minutes\n\
   set announce minutes|seconds N - Fine-tune alerts\n\
-  show settings     - Display settings\n\
-  out               - Record OUT log entry\n\
-  persist           - Save current settings\n\
-  exit|quit         - Exit script\n\
-  help              - Show this list"
-      ;;
-    exit|quit)
-      log "👋 Exiting..."; exit 0 ;;
-    *)
-      log "❓ Unknown command: $1"
-      ;;
+  show settings            - Display settings\n\
+  reload                   - Reload settings\n\
+  persist                  - Save current settings\n\
+  help                     - Show this list\n\
+  exit|quit                - Exit script"
+  ;;
+
+    exit|quit) log "👋 Exiting..."; exit 0 ;;
+    *) log "❓ Unknown command: $1" ;;
   esac
 }
 
-# 🚀 Start
+# Startup
 load_settings
 set_voice
 msg=$(calculate_remaining)
 log "$msg"
 announce "$msg"
+
+# Lock check
+if [ -e "$LOCKFILE" ]; then
+  echo "🔒 Another instance is already running. Exiting."
+  exit 1
+else
+  touch "$LOCKFILE"
+  trap 'rm -f "$LOCKFILE"; exit' INT TERM EXIT
+fi
+
 auto_announce &
 
 if [[ "$#" -gt 0 ]]; then

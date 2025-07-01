@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "[mock] notify-send $@" >> /tmp/notify.log

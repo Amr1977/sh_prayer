@@ -175,6 +175,9 @@ auto_announce() {
     elif [[ "$msg" =~ ([0-9]+)\ minutes ]]; then
       remaining_hr=0
       remaining_min="${BASH_REMATCH[1]}"
+    elif [[ "$msg" =~ Last\ third\ of\ the\ night\ begins\ in\ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
+      remaining_hr="${BASH_REMATCH[1]}"
+      remaining_min="${BASH_REMATCH[2]}"
     else
       continue
     fi

@@ -24,6 +24,8 @@ ADHAN_SOUND="$SCRIPT_DIR/azan.mp3"
 load_settings() { [ -f "$SETTINGS_FILE" ] && source "$SETTINGS_FILE"; }
 
 
+
+
 play_azan() {
   [[ -f "$ADHAN_SOUND" ]] && mpv "$ADHAN_SOUND" >/dev/null 2>&1 &
 }
@@ -90,14 +92,27 @@ calculate_remaining() {
   local day_of_week=$(date "+%A")
   local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
 
-  local maghrib=$(get_prayer_time "$response" "maghrib")
-  local isha=$(get_prayer_time "$response" "isha")
   local fajr=$(get_prayer_time "$response" "fajr")
+  local today=$(date +%F)
+  local fajr_today_ts=$(date -d "$today $fajr" +%s)
+  local fajr_tomorrow_ts=$(date -d "$(date -d tomorrow +%F) $fajr" +%s)
 
-  local maghrib_ts=$(date -d "$(date +%F) $maghrib" +%s)
-  local isha_ts=$(date -d "$(date +%F) $isha" +%s)
-  local fajr_ts=$(date -d "$(date -d tomorrow +%F) $fajr" +%s)
-
+  if (( now_ts < fajr_today_ts )); then
+    # After midnight but before today's Fajr: use yesterday's Maghrib/Isha and today's Fajr
+    local yest=$(date -d "yesterday" +%F)
+    local maghrib=$(get_prayer_time "$response" "maghrib")
+    local isha=$(get_prayer_time "$response" "isha")
+    local maghrib_ts=$(date -d "$yest $maghrib" +%s)
+    local isha_ts=$(date -d "$yest $isha" +%s)
+    local fajr_ts=$fajr_today_ts
+  else
+    # After today's Fajr: use today's Maghrib/Isha and tomorrow's Fajr
+    local maghrib=$(get_prayer_time "$response" "maghrib")
+    local isha=$(get_prayer_time "$response" "isha")
+    local maghrib_ts=$(date -d "$today $maghrib" +%s)
+    local isha_ts=$(date -d "$today $isha" +%s)
+    local fajr_ts=$fajr_tomorrow_ts
+  fi
   [ "$is_dst" -eq 1 ] && {
     maghrib_ts=$((maghrib_ts + 3600))
     isha_ts=$((isha_ts + 3600))
@@ -106,6 +121,8 @@ calculate_remaining() {
 
   local night_duration=$((fajr_ts - maghrib_ts))
   local last_third_start=$((maghrib_ts + 2 * night_duration / 3))
+  echo "DEBUG: now_ts=$now_ts maghrib_ts=$maghrib_ts isha_ts=$isha_ts fajr_ts=$fajr_ts last_third_start=$last_third_start" >&2
+  echo "DEBUG: now=$(date -d @$now_ts) maghrib=$(date -d @$maghrib_ts) isha=$(date -d @$isha_ts) fajr=$(date -d @$fajr_ts) last_third_start=$(date -d @$last_third_start)" >&2
 
   if (( now_ts < maghrib_ts )); then
     # Regular daytime: announce next prayer
@@ -122,11 +139,13 @@ calculate_remaining() {
       fi
     done
   elif (( now_ts >= isha_ts && now_ts < last_third_start )); then
-    local diff=$((last_third_start - now_ts))
-    local h=$(( diff / 3600 ))
-    local m=$(( (diff % 3600) / 60 ))
-    echo "Last third of the night begins in $h hours and $m minutes."
-    return
+  local diff=$((last_third_start - now_ts))
+  local h=$(( diff / 3600 ))
+  local m=$(( (diff % 3600) / 60 ))
+  local time_str
+  time_str=$(format_time "$h" "$m")
+  echo "Last third of the night begins in $time_str."
+  return
   elif (( now_ts >= last_third_start && now_ts < fajr_ts )); then
     local diff=$((fajr_ts - now_ts))
     local h=$(( diff / 3600 ))
@@ -138,14 +157,28 @@ calculate_remaining() {
   fi
 }
 
+format_time() {
+  local h="$1"
+  local m="$2"
+  local out=""
+  if (( h > 0 )); then
+    out="$h hour"
+    (( h > 1 )) && out+="s"
+  fi
+  if (( m > 0 )); then
+    [[ -n "$out" ]] && out+=" and "
+    out+="$m minute"
+    (( m > 1 )) && out+="s"
+  fi
+  echo "$out"
+}
+
 return_msg() {
   local label="$1" h="$2" m="$3"
-  if (( h > 0 && m > 0 )); then
-    echo "$label prayer in $h hours and $m minutes."
-  elif (( h > 0 && m == 0 )); then
-    echo "$label prayer in $h hours."
-  elif (( h == 0 && m > 0 )); then
-    echo "$label prayer in $m minutes."
+  local time_str
+  time_str=$(format_time "$h" "$m")
+  if [[ -n "$time_str" ]]; then
+    echo "$label prayer in $time_str."
   else
     echo "It's time for $label prayer!"
   fi
@@ -162,7 +195,11 @@ auto_announce() {
     local remaining_min=0
     local remaining_hr=0
 
-    if [[ "$msg" =~ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
+    # Match "Last third of the night begins in X hours and Y minutes" first
+    if [[ "$msg" =~ Last\ third\ of\ the\ night\ begins\ in\ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
+      remaining_hr="${BASH_REMATCH[1]}"
+      remaining_min="${BASH_REMATCH[2]}"
+    elif [[ "$msg" =~ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
       remaining_hr="${BASH_REMATCH[1]}"
       remaining_min="${BASH_REMATCH[2]}"
       if (( remaining_hr == 0 && remaining_min == 0 )); then
@@ -175,9 +212,6 @@ auto_announce() {
     elif [[ "$msg" =~ ([0-9]+)\ minutes ]]; then
       remaining_hr=0
       remaining_min="${BASH_REMATCH[1]}"
-    elif [[ "$msg" =~ Last\ third\ of\ the\ night\ begins\ in\ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
-      remaining_hr="${BASH_REMATCH[1]}"
-      remaining_min="${BASH_REMATCH[2]}"
     else
       continue
     fi

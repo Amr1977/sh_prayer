@@ -23,6 +23,11 @@ ADHAN_SOUND="$SCRIPT_DIR/azan.mp3"
 
 load_settings() { [ -f "$SETTINGS_FILE" ] && source "$SETTINGS_FILE"; }
 
+
+play_azan() {
+  [[ -f "$ADHAN_SOUND" ]] && mpv "$ADHAN_SOUND" >/dev/null 2>&1 &
+}
+
 save_settings() {
   cat > "$SETTINGS_FILE" <<EOF
 LANGUAGE_MODE="$LANGUAGE_MODE"
@@ -156,6 +161,13 @@ auto_announce() {
     if [[ "$msg" =~ ([0-9]+)\ hours\ and\ ([0-9]+)\ minutes ]]; then
       remaining_hr="${BASH_REMATCH[1]}"
       remaining_min="${BASH_REMATCH[2]}"
+      if (( remaining_hr == 0 && remaining_min == 0 )); then
+        log "🕌 It's prayer time! Playing azan."
+        play_azan
+        last_spoken_min=$remaining_min
+        last_spoken_hr=$remaining_hr
+        continue
+      fi
     elif [[ "$msg" =~ ([0-9]+)\ minutes ]]; then
       remaining_hr=0
       remaining_min="${BASH_REMATCH[1]}"

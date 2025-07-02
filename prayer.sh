@@ -181,6 +181,8 @@ auto_announce() {
       for ((s=SECONDS_ANNOUNCE; s>=1; s-=2)); do
         log "$s seconds remaining..."
         announce "$s seconds remaining..."
+        last_spoken_min=$remaining_min
+        last_spoken_hr=$remaining_hr
         sleep 2
       done
       continue
@@ -308,14 +310,21 @@ msg=$(calculate_remaining)
 log "$msg"
 announce "$msg"
 
-# Lock check
+# Improved Lock check
 if [ -e "$LOCKFILE" ]; then
-  echo "🔒 Another instance is already running. Exiting."
-  exit 1
-else
-  touch "$LOCKFILE"
-  trap 'rm -f "$LOCKFILE"; exit' INT TERM EXIT
+  LOCKPID=$(cat "$LOCKFILE")
+  if [ -n "$LOCKPID" ] && kill -0 "$LOCKPID" 2>/dev/null; then
+    echo "🔒 Another instance (PID $LOCKPID) is already running. Exiting."
+    exit 1
+  else
+    echo "⚠️ Stale lock file found. Removing."
+    rm -f "$LOCKFILE"
+  fi
 fi
+
+echo $$ > "$LOCKFILE"
+trap 'rm -f "$LOCKFILE"; exit' INT TERM EXIT
+
 
 auto_announce &
 

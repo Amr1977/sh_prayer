@@ -140,10 +140,14 @@ calculate_remaining() {
 
 return_msg() {
   local label="$1" h="$2" m="$3"
-  if (( h > 0 )); then
+  if (( h > 0 && m > 0 )); then
     echo "$label prayer in $h hours and $m minutes."
-  else
+  elif (( h > 0 && m == 0 )); then
+    echo "$label prayer in $h hours."
+  elif (( h == 0 && m > 0 )); then
     echo "$label prayer in $m minutes."
+  else
+    echo "It's time for $label prayer!"
   fi
 }
 
@@ -217,6 +221,39 @@ auto_announce() {
   done
 }
 
+show_prayer_times() {
+  local response=$(fetch_prayer_times)
+  local date=$(echo "$response" | jq -r '.items[0].date_for')
+  local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
+
+  echo "📅 Prayer Times for $date:"
+
+  declare -A times
+  for p in fajr dhuhr asr maghrib isha; do
+    local raw=$(get_prayer_time "$response" "$p")
+    local ts=$(date -d "$(date +%F) $raw" +%s)
+    [ "$is_dst" -eq 1 ] && ts=$((ts + 3600))
+    times[$p]=$ts
+    local adj=$(date -d "@$ts" +"%I:%M %p" | sed 's/^0//')
+    printf "🕒 %7s: %s\n" "$(tr 'a-z' 'A-Z' <<< "$p")" "$adj"
+  done
+
+  # Fetch tomorrow's fajr for accurate night duration
+  local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
+  local tomorrow=$(date -d "tomorrow" +%Y-%m-%d)
+  local api_url="https://muslimsalat.com/${location// /}/$tomorrow.json"
+  local next_day=$(curl -s "$api_url")
+
+  local fajr_tomorrow=$(echo "$next_day" | jq -r ".items[0].fajr")
+  local fajr_ts=$(date -d "$tomorrow $fajr_tomorrow" +%s)
+  [ "$is_dst" -eq 1 ] && fajr_ts=$((fajr_ts + 3600))
+
+  local night_duration=$((fajr_ts - times[maghrib]))
+  local last_third_start=$((times[maghrib] + 2 * night_duration / 3))
+  local last_third_str=$(date -d "@$last_third_start" +"%I:%M %p" | sed 's/^0//')
+  echo "🌙 LAST THIRD: $last_third_str"
+}
+
 handle_command() {
   case "$1" in
     ar|en)
@@ -262,36 +299,7 @@ handle_command() {
       save_settings; log "✅ Settings persisted."
       ;;
      times)
-      local response=$(fetch_prayer_times)
-      local date=$(echo "$response" | jq -r '.items[0].date_for')
-      local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
-
-      echo "📅 Prayer Times for $date:"
-
-      declare -A times
-      for p in fajr dhuhr asr maghrib isha; do
-        local raw=$(get_prayer_time "$response" "$p")
-        local ts=$(date -d "$(date +%F) $raw" +%s)
-        [ "$is_dst" -eq 1 ] && ts=$((ts + 3600))
-        times[$p]=$ts
-        local adj=$(date -d "@$ts" +"%I:%M %p" | sed 's/^0//')
-        printf "🕒 %7s: %s\n" "$(tr 'a-z' 'A-Z' <<< "$p")" "$adj"
-      done
-
-      # Fetch tomorrow's fajr for accurate night duration
-      local location=$(curl -s ipinfo.io | jq -r '.city + "," + .country')
-      local tomorrow=$(date -d "tomorrow" +%Y-%m-%d)
-      local api_url="https://muslimsalat.com/${location// /}/$tomorrow.json"
-      local next_day=$(curl -s "$api_url")
-
-      local fajr_tomorrow=$(echo "$next_day" | jq -r ".items[0].fajr")
-      local fajr_ts=$(date -d "$tomorrow $fajr_tomorrow" +%s)
-      [ "$is_dst" -eq 1 ] && fajr_ts=$((fajr_ts + 3600))
-
-      local night_duration=$((fajr_ts - times[maghrib]))
-      local last_third_start=$((times[maghrib] + 2 * night_duration / 3))
-      local last_third_str=$(date -d "@$last_third_start" +"%I:%M %p" | sed 's/^0//')
-      echo "🌙 LAST THIRD: $last_third_str"
+      show_prayer_times
       ;;
     help)
   echo -e "🆘 Commands:\n\
@@ -318,6 +326,7 @@ handle_command() {
 # Startup
 load_settings
 set_voice
+show_prayer_times
 msg=$(calculate_remaining)
 log "$msg"
 announce "$msg"

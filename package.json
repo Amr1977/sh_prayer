@@ -1,0 +1,25 @@
+{
+  "name": "sh_prayer",
+  "version": "1.0.0",
+  "description": "A lightweight Bash script that **announces upcoming Muslim prayer times** using text-to-speech (TTS) and desktop notifications. It auto-detects your location, fetches accurate prayer times, and provides a powerful interactive REPL for control and customization.",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bin": {
+    "prayer": "./prayer-cli.js"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "node-fetch": "^3.3.2",
+    "prompt-sync": "^4.2.0",
+    "say": "^0.16.0"
+  }
+}

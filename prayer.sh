@@ -86,6 +86,34 @@ get_prayer_time() {
   echo "$json" | jq -r ".items[0].$key"
 }
 
+get_hijri_date() {
+  local today=$(date +%Y-%m-%d)
+  local year month day
+  year=$(date +%Y)
+  month=$(date +%m)
+  day=$(date +%d)
+  # Fetch the month's Hijri calendar
+  local hijri_json=$(curl -s "https://api.aladhan.com/v1/gToHCalendar/$month/$year?adjustment=0")
+  if [[ -z "$hijri_json" ]]; then
+    echo "🗓️ Hijri Date: (unavailable - API unreachable)"
+    return
+  fi
+  # Find today's Gregorian date in the calendar
+  local idx=$(echo "$hijri_json" | jq ".data | to_entries[] | select(.value.gregorian.date==\"$today\") | .key")
+  if [[ -z "$idx" ]]; then
+    echo "🗓️ Hijri Date: (unavailable - not found)"
+    return
+  fi
+  local hijri_day=$(echo "$hijri_json" | jq -r ".data[$idx].hijri.day")
+  local hijri_month=$(echo "$hijri_json" | jq -r ".data[$idx].hijri.month.en")
+  local hijri_year=$(echo "$hijri_json" | jq -r ".data[$idx].hijri.year")
+  if [[ -z "$hijri_day" || -z "$hijri_month" || -z "$hijri_year" || "$hijri_day" == "null" || "$hijri_month" == "null" || "$hijri_year" == "null" ]]; then
+    echo "🗓️ Hijri Date: (unavailable - parsing error)"
+    return
+  fi
+  echo "🗓️ Hijri Date: $hijri_day $hijri_month $hijri_year AH"
+}
+
 calculate_remaining() {
   local now_ts=$(date +%s)
   local response=$(fetch_prayer_times)
@@ -121,10 +149,10 @@ calculate_remaining() {
 
   local night_duration=$((fajr_ts - maghrib_ts))
   local last_third_start=$((maghrib_ts + 2 * night_duration / 3))
-  echo "DEBUG: now_ts=$now_ts maghrib_ts=$maghrib_ts isha_ts=$isha_ts fajr_ts=$fajr_ts last_third_start=$last_third_start" >&2
-  echo "DEBUG: now=$(date -d @$now_ts) maghrib=$(date -d @$maghrib_ts) isha=$(date -d @$isha_ts) fajr=$(date -d @$fajr_ts) last_third_start=$(date -d @$last_third_start)" >&2
+  # echo "DEBUG: now_ts=$now_ts maghrib_ts=$maghrib_ts isha_ts=$isha_ts fajr_ts=$fajr_ts last_third_start=$last_third_start" >&2
+  # echo "DEBUG: now=$(date -d @$now_ts) maghrib=$(date -d @$maghrib_ts) isha=$(date -d @$isha_ts) fajr=$(date -d @$fajr_ts) last_third_start=$(date -d @$last_third_start)" >&2
 
-  if (( now_ts < maghrib_ts )); then
+  if (( now_ts < isha_ts )); then
     # Regular daytime: announce next prayer
     for prayer in fajr dhuhr asr maghrib isha; do
       local raw=$(get_prayer_time "$response" "$prayer")
@@ -264,7 +292,7 @@ show_prayer_times() {
   local is_dst=$(date +%Z | grep -qE 'EEST|CEST|DST' && echo 1 || echo 0)
 
   echo "📅 Prayer Times for $date:"
-
+  get_hijri_date
   declare -A times
   for p in fajr dhuhr asr maghrib isha; do
     local raw=$(get_prayer_time "$response" "$p")
@@ -329,6 +357,9 @@ handle_command() {
     show)
       echo -e "⏱️ Current settings:\n- MINUTES_INTERVAL=$MINUTES_INTERVAL\n- MINUTES_ANNOUNCE=$MINUTES_ANNOUNCE\n- SECONDS_ANNOUNCE=$SECONDS_ANNOUNCE"
       ;;
+    hijri)
+      get_hijri_date
+      ;;
     reload)
       load_settings; set_voice; log "🔁 Settings reloaded."
       ;;
@@ -364,6 +395,7 @@ handle_command() {
 load_settings
 set_voice
 show_prayer_times
+get_hijri_date
 msg=$(calculate_remaining)
 log "$msg"
 announce "$msg"

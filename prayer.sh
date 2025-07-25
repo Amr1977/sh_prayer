@@ -1,5 +1,55 @@
 #!/bin/bash
 
+ensure_dependencies() {
+  # Main dependencies
+  local pkgs=(mpv espeak jq curl amixer notify-send)
+  # For voices: mbrola and mbrola voices for US English and Arabic
+  local voice_pkgs=(mbrola mbrola-us2 mbrola-ar1)
+  local missing=()
+  local missing_voice=()
+
+  # Check main dependencies
+  for pkg in "${pkgs[@]}"; do
+    if ! command -v "$pkg" >/dev/null 2>&1; then
+      missing+=("$pkg")
+    fi
+  done
+
+  # Check mbrola voices (only if espeak is present)
+  if command -v espeak >/dev/null 2>&1; then
+    for vpkg in "${voice_pkgs[@]}"; do
+      dpkg -s "$vpkg" >/dev/null 2>&1 || missing_voice+=("$vpkg")
+    done
+  fi
+
+  if [ "${#missing[@]}" -gt 0 ] || [ "${#missing_voice[@]}" -gt 0 ]; then
+    echo "🔧 Installing missing packages: ${missing[*]} ${missing_voice[*]}"
+    if command -v apt-get >/dev/null 2>&1; then
+      # Check for dpkg lock
+      if sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+        echo "❌ Package manager is busy. Please wait for other installations to finish and rerun this script."
+        exit 1
+      fi
+      sudo apt-get update
+      if [ "${#missing[@]}" -gt 0 ]; then
+        sudo apt-get install -y "${missing[@]}"
+      fi
+      if [ "${#missing_voice[@]}" -gt 0 ]; then
+        sudo apt-get install -y "${missing_voice[@]}"
+      fi
+    elif command -v dnf >/dev/null 2>&1; then
+      sudo dnf install -y "${missing[@]}" "${missing_voice[@]}"
+    elif command -v pacman >/dev/null 2>&1; then
+      sudo pacman -Sy --noconfirm "${missing[@]}" "${missing_voice[@]}"
+    else
+      echo "❌ No supported package manager found. Please install: ${missing[*]} ${missing_voice[*]}"
+      exit 1
+    fi
+  fi
+}
+
+ensure_dependencies
+
 LANGUAGE_MODE="en"
 VOICE="mb-us2"
 PITCH="-p 20"
@@ -400,15 +450,18 @@ msg=$(calculate_remaining)
 log "$msg"
 announce "$msg"
 
-# Improved Lock check
 if [ -e "$LOCKFILE" ]; then
   LOCKPID=$(cat "$LOCKFILE")
   if [ -n "$LOCKPID" ] && kill -0 "$LOCKPID" 2>/dev/null; then
     echo "🔒 Another instance (PID $LOCKPID) is already running. Exiting."
     exit 1
   else
-    echo "⚠️ Stale lock file found. Removing."
-    rm -f "$LOCKFILE"
+    echo "⚠️ Stale lock file found."
+    read -p "Do you want to delete the lock file? [y/N]: " yn
+    case "$yn" in
+      [Yy]*) rm -f "$LOCKFILE"; echo "✅ Lock file deleted." ;;
+      *) echo "Exiting."; exit 1 ;;
+    esac
   fi
 fi
 

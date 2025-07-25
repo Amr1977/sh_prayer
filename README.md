@@ -26,19 +26,36 @@ A lightweight Bash script that **announces upcoming Muslim prayer times** using 
 
 ## 🛠️ Requirements
 
-- `bash`
-- `espeak` or `espeak-ng`
-- `jq`
-- `curl`
-- `notify-send` (for notifications)
-- `amixer` (for volume control)
-- `mpv` (for Azan playback, optional)
+Install all required packages on Ubuntu/Debian:
 
-Install on Ubuntu/Debian:
 ```bash
 sudo apt update
-sudo apt install espeak-ng jq curl at alsa-utils mpv
+sudo apt install \
+  espeak \
+  jq \
+  curl \
+  alsa-utils \
+  libnotify-bin \
+  mpv \
+  mbrola \
+  mbrola-us2
 ```
+
+**Package details:**
+- **espeak**: For text-to-speech announcements (English/Arabic)
+- **jq**: For parsing JSON from APIs
+- **curl**: For fetching data from the internet
+- **alsa-utils**: Provides `amixer` for volume control
+- **libnotify-bin**: Provides `notify-send` for desktop notifications
+- **mpv**: For Azan (Adhan) MP3 playback
+- **mbrola** and **mbrola-us2**: Required for the `mb-us2` voice with espeak (high-quality English TTS)
+
+**Notes:**
+- To use the `mb-us2` voice, both `mbrola` and `mbrola-us2` must be installed.
+- Test the voice with:  
+  `espeak -v mb-us2 "Hello, this is a test."`
+- If you encounter sound issues, ensure your system audio is not muted and your user is in the `audio` group.
+- Make sure your audio files (`azan.mp3`, `bell.wav`) are present in the script directory.
 
 ---
 
@@ -70,7 +87,8 @@ chmod +x prayer.sh
 | `reload`                       | Reload settings from disk                                          |
 | `persist`                      | Save current settings                                              |
 | `help`                         | Show help message                                                  |
-| `exit` / `quit`                | Exit the script      
+| `exit` / `quit`                | Exit the script                                                  |
+
 ---
 
 ## 🔒 Robust Locking
